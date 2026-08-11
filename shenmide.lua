@@ -1,6 +1,7 @@
 --[[
-    极简飞行脚本 – 只使用按钮自身事件，无调试输出
-    点击切换飞行，拖动移动按钮
+    纯点击飞行脚本 – 无拖动，只响应点击
+    按钮样式：白底黑字黑边框圆角
+    功能：点击切换飞行/着陆，显示状态，第三人称，穿墙，摇杆控制方向
 ]]
 
 local player = game.Players.LocalPlayer
@@ -32,11 +33,11 @@ statusLabel.Text = ""
 statusLabel.Visible = false
 statusLabel.ZIndex = 100
 
--- 按钮（稍大，方便触摸）
+-- 按钮（大小适中，无拖动）
 local button = Instance.new("TextButton")
 button.Parent = screenGui
-button.Size = UDim2.new(0, 120, 0, 50)
-button.Position = UDim2.new(0.5, -60, 0.5, -25)
+button.Size = UDim2.new(0, 110, 0, 44)
+button.Position = UDim2.new(0.5, -55, 0.5, -22)  -- 居中，固定
 button.BackgroundColor3 = Color3.new(1, 1, 1)
 button.TextColor3 = Color3.new(0, 0, 0)
 button.Text = "飞行"
@@ -56,35 +57,7 @@ local corner = Instance.new("UICorner")
 corner.Parent = button
 corner.CornerRadius = UDim.new(0, 10)
 
--- 拖动逻辑（不影响点击）
-local isDragging = false
-local dragStart = nil
-local dragOrigin = nil
-
-button.TouchBegan:Connect(function(input)
-    isDragging = false
-    dragStart = input.Position
-    dragOrigin = button.Position
-end)
-
-button.TouchMoved:Connect(function(input)
-    if not dragStart then return end
-    local delta = input.Position - dragStart
-    if delta.Magnitude > 10 then
-        isDragging = true
-        local newX = dragOrigin.X.Scale + delta.X / screenGui.AbsoluteSize.X
-        local newY = dragOrigin.Y.Scale + delta.Y / screenGui.AbsoluteSize.Y
-        button.Position = UDim2.new(math.clamp(newX, 0.05, 0.85), 0, math.clamp(newY, 0.05, 0.85), 0)
-    end
-end)
-
-button.TouchEnded:Connect(function()
-    dragStart = nil
-    dragOrigin = nil
-    -- 注意：如果拖动，则不会触发 Activated（因为 Activated 是在点击时触发，拖动不会触发）
-end)
-
--- 点击事件（使用 Activated，触摸和鼠标均有效，且不会因拖动而触发）
+-- ===== 飞行逻辑（与之前相同） =====
 local flying = false
 local bodyVelocity = nil
 local bodyGyro = nil
@@ -155,9 +128,14 @@ function toggleFly()
     end
 end
 
-button.Activated:Connect(toggleFly)
+-- ===== 关键：使用最原始的事件绑定（确保可点击） =====
+button.MouseButton1Click:Connect(toggleFly)   -- PC
+button.TouchTap:Connect(toggleFly)            -- 手机
 
--- 飞行控制
+-- 额外：如果 TouchTap 在某些设备不触发，用 TouchEnded 作为后备（但不用它防止双击）
+-- 但我们只用上面两个，它们是最稳定的。
+
+-- ===== 飞行控制（第三人称 + 摇杆） =====
 runService.RenderStepped:Connect(function()
     if not flying or not root or not hum then return end
 
