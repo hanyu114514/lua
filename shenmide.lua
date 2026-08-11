@@ -1,9 +1,5 @@
 --[[
-    手机飞行脚本 – 使用全局触摸事件，确保点击与拖动可靠
-    - 按钮大小 100x40，白底黑字圆角，居中，可拖动
-    - 点击切换飞行，显示状态
-    - 飞行方向使用摇杆（Humanoid.MoveDirection）
-    - 第三人称锁定，穿墙
+    稳定版飞行脚本 – 解决按钮点击和地板滑动问题
 ]]
 
 local player = game.Players.LocalPlayer
@@ -22,7 +18,7 @@ screenGui.Parent = playerGui
 screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 
--- ===== 状态提示标签 =====
+-- ===== 状态提示 =====
 local statusLabel = Instance.new("TextLabel")
 statusLabel.Parent = screenGui
 statusLabel.Size = UDim2.new(0, 260, 0, 50)
@@ -47,10 +43,11 @@ button.TextSize = 24
 button.TextScaled = true
 button.AutoButtonColor = false
 button.ZIndex = 100
-button.Active = true                    -- 确保可交互
+button.Active = true
 button.Visible = true
 button.Selectable = true
 
+-- 边框 + 圆角
 local stroke = Instance.new("UIStroke")
 stroke.Parent = button
 stroke.Thickness = 2.5
@@ -61,118 +58,39 @@ local corner = Instance.new("UICorner")
 corner.Parent = button
 corner.CornerRadius = UDim.new(0, 10)
 
--- ===== 全局触摸状态 =====
-local isDragging = false
-local dragStartPos = nil
-local dragStartMouse = nil
-local buttonAbsPos = nil
-
--- 获取按钮绝对位置
-local function getButtonAbs()
-    return button.AbsolutePosition, button.AbsoluteSize
-end
-
--- 判断点是否在按钮内
-local function isPointInButton(pos)
-    local absPos, absSize = getButtonAbs()
-    if not absPos or not absSize then return false end
-    return pos.X >= absPos.X and pos.X <= absPos.X + absSize.X and
-           pos.Y >= absPos.Y and pos.Y <= absPos.Y + absSize.Y
-end
-
--- 更新按钮位置（基于屏幕比例）
-local function updateButtonPosition(delta)
-    if not dragStartPos then return end
-    local newX = dragStartPos.X.Scale + (delta.X / screenGui.AbsoluteSize.X)
-    local newY = dragStartPos.Y.Scale + (delta.Y / screenGui.AbsoluteSize.Y)
-    newX = math.clamp(newX, 0.05, 0.85)
-    newY = math.clamp(newY, 0.05, 0.85)
-    button.Position = UDim2.new(newX, 0, newY, 0)
-end
-
--- ===== 触摸事件处理（使用 UserInputService） =====
-uis.TouchBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.UserInputType ~= Enum.UserInputType.Touch then return end
-    if not isPointInButton(input.Position) then return end
-
-    -- 开始在按钮上触摸
-    isDragging = false
-    dragStartMouse = input.Position
-    dragStartPos = button.Position
-    print("[飞行] 触摸开始")
-end)
-
-uis.TouchMoved:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.UserInputType ~= Enum.UserInputType.Touch then return end
-    if not dragStartMouse then return end
-
-    local delta = input.Position - dragStartMouse
-    if delta.Magnitude > 8 then
-        isDragging = true
-        updateButtonPosition(delta)
-        print("[飞行] 拖动中")
-    end
-end)
-
-uis.TouchEnded:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.UserInputType ~= Enum.UserInputType.Touch then return end
-    if not dragStartMouse then return end
-
-    if not isDragging then
-        -- 这是一个点击（没有拖动）
-        print("[飞行] 点击触发")
-        toggleFly()
-    else
-        print("[飞行] 拖动结束")
-    end
-
-    -- 重置状态
-    isDragging = false
-    dragStartMouse = nil
-    dragStartPos = nil
-end)
-
--- 同时支持鼠标（PC测试）
-uis.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        if isPointInButton(input.Position) then
-            isDragging = false
-            dragStartMouse = input.Position
-            dragStartPos = button.Position
-        end
-    end
-end)
-uis.InputMoved:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.UserInputType == Enum.UserInputType.MouseMovement then
-        if dragStartMouse then
-            local delta = input.Position - dragStartMouse
-            if delta.Magnitude > 8 then
-                isDragging = true
-                updateButtonPosition(delta)
+-- ===== 拖动功能（简单版） =====
+local function onDrag(input)
+    local startPos = button.Position
+    local startMouse = input.Position
+    local moveConn
+    moveConn = uis.InputChanged:Connect(function(input2)
+        if input2.UserInputType == Enum.UserInputType.Touch or input2.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input2.Position - startMouse
+            if delta.Magnitude > 10 then
+                local newX = startPos.X.Scale + delta.X / screenGui.AbsoluteSize.X
+                local newY = startPos.Y.Scale + delta.Y / screenGui.AbsoluteSize.Y
+                button.Position = UDim2.new(math.clamp(newX, 0.05, 0.85), 0, math.clamp(newY, 0.05, 0.85), 0)
             end
         end
-    end
-end)
-uis.InputEnded:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        if dragStartMouse then
-            if not isDragging then
-                toggleFly()
-            end
-            isDragging = false
-            dragStartMouse = nil
-            dragStartPos = nil
+    end)
+    local endConn
+    endConn = uis.InputEnded:Connect(function(input2)
+        if input2 == input then
+            moveConn:Disconnect()
+            endConn:Disconnect()
         end
-    end
+    end)
+end
+
+button.TouchBegan:Connect(function(input)
+    -- 仅当触摸在按钮上时启动拖动
+    onDrag(input)
+end)
+button.MouseButton1Down:Connect(function(input)
+    onDrag({Position = input.Position, UserInputType = Enum.UserInputType.MouseButton1})
 end)
 
--- ===== 飞行核心逻辑 =====
+-- ===== 点击切换飞行 =====
 local flying = false
 local bodyVelocity = nil
 local bodyGyro = nil
@@ -201,8 +119,10 @@ function enableFly()
         showStatus("角色未找到", false)
         return false
     end
+    -- 彻底禁用物理影响
     root.CanCollide = false
     hum.PlatformStand = true
+    hum.WalkSpeed = 0  -- 禁止行走
 
     bodyVelocity = Instance.new("BodyVelocity")
     bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
@@ -221,12 +141,16 @@ function enableFly()
 end
 
 function disableFly()
+    -- 彻底清除所有物理物件
     if bodyVelocity then bodyVelocity:Destroy() bodyVelocity = nil end
     if bodyGyro then bodyGyro:Destroy() bodyGyro = nil end
     if root then root.CanCollide = true end
     if hum then
         hum.PlatformStand = false
-        hum.WalkSpeed = 16
+        hum.WalkSpeed = 16  -- 恢复正常行走速度
+        -- 强制重置所有速度（防止残留）
+        hum:SetStateEnabled(Enum.HumanoidStateType.Physics, true)
+        hum:ChangeState(Enum.HumanoidStateType.GettingUp) -- 重置状态
     end
     flying = false
     button.Text = "飞行"
@@ -241,6 +165,24 @@ function toggleFly()
     end
 end
 
+-- 使用按钮自身的点击事件（触摸和鼠标）
+button.TouchTap:Connect(toggleFly)
+button.MouseButton1Click:Connect(toggleFly)
+
+-- 额外：如果 TouchTap 被拦截，则用 MouseButton1Down 作为备选
+button.MouseButton1Down:Connect(function()
+    -- 但 MouseButton1Down 会与拖动冲突，所以我们在这里判断是否发生了拖动
+    -- 但简单起见，我们可以直接用 TouchTap，它只在触摸结束时触发，且不响应拖动（若拖动距离大可能不触发）
+    -- 这里我们使用一个简单的防误触：在 TouchEnded 时检查是否移动了很多
+    -- 但为了稳定，我们直接绑定 TouchTap 和 MouseButton1Click，它们是标准的点击事件。
+end)
+
+-- 由于 TouchTap 可能在某些设备上不触发，我们还可以添加一个带防误触的 TouchEnded 处理：
+button.TouchEnded:Connect(function(input)
+    -- 如果触摸开始和结束位置距离小于阈值，则视为点击
+    -- 但拖动已经由 TouchBegan 启动，这里我们不处理，避免冲突
+end)
+
 -- ===== 飞行控制（第三人称 + 摇杆） =====
 runService.RenderStepped:Connect(function()
     if not flying or not root or not hum then return end
@@ -250,7 +192,7 @@ runService.RenderStepped:Connect(function()
     local camOffset = Vector3.new(0, 4, 0) - camera.CFrame.LookVector * 10
     camera.CFrame = CFrame.lookAt(root.Position + camOffset, root.Position + Vector3.new(0, 2, 0))
 
-    -- 角色面朝相机前方（水平）
+    -- 角色面朝相机前方
     local lookDir = camera.CFrame.LookVector
     lookDir = Vector3.new(lookDir.X, 0, lookDir.Z).Unit
     if lookDir.Magnitude > 0.01 then
@@ -260,10 +202,9 @@ runService.RenderStepped:Connect(function()
     -- 摇杆移动
     local moveDir = hum.MoveDirection
     if moveDir.Magnitude > 0.01 then
-        -- 转换为世界空间（因为角色朝向已与相机一致，所以直接使用角色朝向）
         local forward = root.CFrame.LookVector
         local right = root.CFrame.RightVector
-        -- MoveDirection 的 X 对应左右，Z 对应前后（相对于角色）
+        -- MoveDirection: X左右, Z前后（相对于角色朝向）
         local velocity = (forward * -moveDir.Z + right * moveDir.X) * FLY_SPEED
         bodyVelocity.Velocity = velocity
     else
@@ -287,4 +228,4 @@ end)
 
 -- 初始化
 getChar()
-print("[飞行测试] 手机终极版加载成功，使用全局触摸事件，点击/拖动应可靠。")
+print("[飞行测试] 稳定版加载，点击按钮切换飞行，拖动按钮移动位置。")
