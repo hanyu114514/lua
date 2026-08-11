@@ -1,10 +1,9 @@
 --[[
-    飞行测试脚本 v4 - 终极版
-    - 飞行方向：相机视野方向（W前，A左，D右，空格上，Shift下）
-    - 穿墙：飞行时无碰撞
-    - 第三人称锁定，角色面朝相机前方
-    - 按钮可拖动，默认居中
-    - 状态显示“已开启/已关闭”
+    飞行测试脚本 v5 – 修复点击与拖动冲突
+    - 按钮可拖动（鼠标/触摸），默认居中
+    - 点击（无拖动）切换飞行/着陆，并显示状态
+    - 飞行方向基于相机视野（WASD 空格 Shift）
+    - 穿墙 + 第三人称锁定
 ]]
 
 local player = game.Players.LocalPlayer
@@ -17,11 +16,11 @@ local runService = game:GetService("RunService")
 local oldGui = playerGui:FindFirstChild("FlyTestGui")
 if oldGui then oldGui:Destroy() end
 
--- 创建主GUI
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "FlyTestGui"
 screenGui.Parent = playerGui
 screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global  -- 确保置顶
 
 -- ===== 状态提示标签 =====
 local statusLabel = Instance.new("TextLabel")
@@ -34,9 +33,9 @@ statusLabel.TextColor3 = Color3.new(1, 1, 1)
 statusLabel.TextSize = 28
 statusLabel.Text = ""
 statusLabel.Visible = false
-statusLabel.ZIndex = 10
+statusLabel.ZIndex = 100
 
--- ===== 飞行按钮（可拖动） =====
+-- ===== 飞行按钮 =====
 local button = Instance.new("TextButton")
 button.Parent = screenGui
 button.Size = UDim2.new(0, 140, 0, 50)
@@ -47,42 +46,50 @@ button.Text = "飞行"
 button.TextSize = 28
 button.TextScaled = true
 button.AutoButtonColor = false
+button.ZIndex = 100
+button.Selectable = true
 
--- 黑色边框 (UIStroke)
+-- 黑色边框 + 圆角
 local stroke = Instance.new("UIStroke")
 stroke.Parent = button
 stroke.Thickness = 3
 stroke.Color = Color3.new(0, 0, 0)
 stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 
--- 圆角
 local corner = Instance.new("UICorner")
 corner.Parent = button
 corner.CornerRadius = UDim.new(0, 12)
 
--- ===== 拖动功能 =====
-local dragging = false
-local dragStartMouse, dragStartPos
+-- ===== 拖动与点击分离逻辑 =====
+local isDragging = false
+local dragStartPos = nil
+local dragStartMouse = nil
 
 local function startDrag(input)
-    dragging = true
+    isDragging = false  -- 重置
     dragStartMouse = input.Position
     dragStartPos = button.Position
 end
 
 local function updateDrag(input)
-    if not dragging then return end
+    if not dragStartMouse then return end
     local delta = input.Position - dragStartMouse
-    local newX = dragStartPos.X.Scale + (delta.X / screenGui.AbsoluteSize.X)
-    local newY = dragStartPos.Y.Scale + (delta.Y / screenGui.AbsoluteSize.Y)
-    button.Position = UDim2.new(newX, 0, newY, 0)
+    -- 如果移动距离超过 5 像素，视为拖动
+    if delta.Magnitude > 5 then
+        isDragging = true
+        local newX = dragStartPos.X.Scale + (delta.X / screenGui.AbsoluteSize.X)
+        local newY = dragStartPos.Y.Scale + (delta.Y / screenGui.AbsoluteSize.Y)
+        button.Position = UDim2.new(newX, 0, newY, 0)
+    end
 end
 
-local function stopDrag()
-    dragging = false
+local function endDrag(input)
+    -- 不在这里触发点击，由点击事件单独处理
+    dragStartMouse = nil
+    dragStartPos = nil
 end
 
--- 鼠标拖动
+-- 鼠标事件
 button.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         startDrag(input)
@@ -95,11 +102,16 @@ button.InputChanged:Connect(function(input)
 end)
 button.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        stopDrag()
+        endDrag(input)
+        -- 如果未拖动，则触发点击
+        if not isDragging then
+            toggleFly()
+        end
+        isDragging = false
     end
 end)
 
--- 触摸拖动
+-- 触摸事件
 button.TouchBegan:Connect(function(input)
     startDrag(input)
 end)
@@ -107,7 +119,11 @@ button.TouchMoved:Connect(function(input)
     updateDrag(input)
 end)
 button.TouchEnded:Connect(function(input)
-    stopDrag()
+    endDrag(input)
+    if not isDragging then
+        toggleFly()
+    end
+    isDragging = false
 end)
 
 -- ===== 飞行核心逻辑 =====
@@ -134,24 +150,19 @@ local function showStatus(text, isSuccess)
     statusLabel.Visible = false
 end
 
--- 开启飞行
-local function enableFly()
+function enableFly()
     if not getChar() then
         showStatus("角色未找到", false)
         return false
     end
-    -- 取消碰撞（穿墙）
     root.CanCollide = false
-    -- 禁用重力
     hum.PlatformStand = true
 
-    -- 速度控制器
     bodyVelocity = Instance.new("BodyVelocity")
     bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
     bodyVelocity.Velocity = Vector3.new(0, 0, 0)
     bodyVelocity.Parent = root
 
-    -- 姿态控制器
     bodyGyro = Instance.new("BodyGyro")
     bodyGyro.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
     bodyGyro.CFrame = root.CFrame
@@ -163,8 +174,7 @@ local function enableFly()
     return true
 end
 
--- 关闭飞行
-local function disableFly()
+function disableFly()
     if bodyVelocity then bodyVelocity:Destroy() bodyVelocity = nil end
     if bodyGyro then bodyGyro:Destroy() bodyGyro = nil end
     if root then root.CanCollide = true end
@@ -177,8 +187,7 @@ local function disableFly()
     showStatus("❌ 已关闭功能", false)
 end
 
--- 切换
-local function toggleFly()
+function toggleFly()
     if flying then
         disableFly()
     else
@@ -186,26 +195,20 @@ local function toggleFly()
     end
 end
 
-button.Activated:Connect(toggleFly)
-
--- ===== 第三人称锁定 + 飞行方向控制 =====
-local function updateCameraAndMovement()
+-- ===== 第三人称 & 飞行方向（基于相机） =====
+runService.RenderStepped:Connect(function()
     if not flying or not root or not hum then return end
 
-    -- 1. 强制第三人称
+    -- 第三人称
     camera.CameraType = Enum.CameraType.Custom
     local camPos = root.Position + Vector3.new(0, 3, 0) - camera.CFrame.LookVector * 12
     camera.CFrame = CFrame.lookAt(camPos, root.Position + Vector3.new(0, 2, 0))
 
-    -- 2. 让角色面朝相机前方（水平方向）
-    local lookDir = camera.CFrame.LookVector
-    lookDir = Vector3.new(lookDir.X, 0, lookDir.Z).Unit  -- 只保留水平
+    -- 角色朝相机前方
+    local lookDir = Vector3.new(camera.CFrame.LookVector.X, 0, camera.CFrame.LookVector.Z).Unit
     root.CFrame = CFrame.lookAt(root.Position, root.Position + lookDir * 10)
 
-    -- 3. 读取移动输入（键盘/摇杆），映射到相机空间
-    local moveDir = hum.MoveDirection  -- 基于角色朝向的相对方向，但我们希望是相机空间
-    -- 因为 MoveDirection 是相对于角色朝向的，但如果我们希望 W 是相机前方，我们需要获取相机空间的方向。
-    -- 更好的方法是直接读取按键，然后构造相机空间速度。
+    -- 基于相机方向的移动速度
     local forward = camera.CFrame.LookVector
     local right = camera.CFrame.RightVector
     local up = Vector3.new(0, 1, 0)
@@ -218,27 +221,16 @@ local function updateCameraAndMovement()
     if uis:IsKeyDown(Enum.KeyCode.Space) then inputVec = inputVec + up end
     if uis:IsKeyDown(Enum.KeyCode.LeftShift) then inputVec = inputVec - up end
 
-    -- 如果有摇杆（手机），摇杆输入会通过 MoveDirection 提供，但我们混合使用
-    -- 为了支持摇杆，我们可以叠加 MoveDirection 但方向要转换到相机空间？
-    -- 这里简化：如果检测到摇杆输入，用 MoveDirection 代替（但很多手机摇杆会与键盘冲突）
-    -- 为了兼容，我们优先键盘，若没有键盘输入则使用 MoveDirection（但 MoveDirection 是相对于角色朝向的，不可用）
-    -- 稳妥：我们直接使用键盘输入，手机用户可以使用触摸摇杆，但为了完整，我们可以添加摇杆支持，但为了简化，我们仅使用键盘。
-    -- 因为用户主要用 PC 测试，所以键盘足够。
-
     if inputVec.Magnitude > 0 then
         bodyVelocity.Velocity = inputVec.Unit * FLY_SPEED
     else
         bodyVelocity.Velocity = Vector3.new(0, 0, 0)
     end
 
-    -- 保持姿态稳定（可无）
     if bodyGyro then
         bodyGyro.CFrame = root.CFrame
     end
-end
-
--- 每帧更新
-runService.RenderStepped:Connect(updateCameraAndMovement)
+end)
 
 -- ===== 角色重生重置 =====
 player.CharacterAdded:Connect(function(newChar)
@@ -252,4 +244,4 @@ end)
 
 -- 初始化
 getChar()
-print("[飞行测试] 加载成功。按钮可拖动，点击切换飞行。WASD 控制方向（基于视角），空格上升，Shift下降。")
+print("[飞行测试] 加载成功。按钮可拖动，点击（不拖动）切换飞行。WASD 方向，空格上升，Shift下降。")
