@@ -1,7 +1,6 @@
 --[[
-    终极飞行脚本 – 使用 UserInputService 全局触摸
-    按钮仅作为视觉元素，点击/拖动完全由全局事件处理
-    附带调试日志（注入器控制台可看）
+    极简飞行脚本 – 只使用按钮自身事件，无调试输出
+    点击切换飞行，拖动移动按钮
 ]]
 
 local player = game.Players.LocalPlayer
@@ -18,10 +17,9 @@ local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "FlyTestGui"
 screenGui.Parent = playerGui
 screenGui.ResetOnSpawn = false
-screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-screenGui.IgnoreGuiInset = true  -- 确保覆盖整个屏幕
+screenGui.IgnoreGuiInset = true
 
--- ===== 状态提示 =====
+-- 状态提示
 local statusLabel = Instance.new("TextLabel")
 statusLabel.Parent = screenGui
 statusLabel.Size = UDim2.new(0, 260, 0, 50)
@@ -34,11 +32,11 @@ statusLabel.Text = ""
 statusLabel.Visible = false
 statusLabel.ZIndex = 100
 
--- ===== 飞行按钮（纯视觉） =====
+-- 按钮（稍大，方便触摸）
 local button = Instance.new("TextButton")
 button.Parent = screenGui
-button.Size = UDim2.new(0, 100, 0, 40)
-button.Position = UDim2.new(0.5, -50, 0.5, -20)
+button.Size = UDim2.new(0, 120, 0, 50)
+button.Position = UDim2.new(0.5, -60, 0.5, -25)
 button.BackgroundColor3 = Color3.new(1, 1, 1)
 button.TextColor3 = Color3.new(0, 0, 0)
 button.Text = "飞行"
@@ -46,10 +44,8 @@ button.TextSize = 24
 button.TextScaled = true
 button.AutoButtonColor = false
 button.ZIndex = 100
-button.Active = false        -- 我们不依赖按钮事件，所以禁用交互
-button.Visible = true
-button.Selectable = false    -- 禁止选中
 
+-- 边框 + 圆角
 local stroke = Instance.new("UIStroke")
 stroke.Parent = button
 stroke.Thickness = 2.5
@@ -60,126 +56,35 @@ local corner = Instance.new("UICorner")
 corner.Parent = button
 corner.CornerRadius = UDim.new(0, 10)
 
--- ===== 全局触摸状态 =====
+-- 拖动逻辑（不影响点击）
 local isDragging = false
-local dragStartPos = nil
-local dragStartMouse = nil
-local isPointerDown = false
+local dragStart = nil
+local dragOrigin = nil
 
--- 判断点是否在按钮内（考虑按钮可能被缩放？但我们的按钮是固定大小，直接使用 Absolute 属性）
-local function isPointInButton(pos)
-    local absPos = button.AbsolutePosition
-    local absSize = button.AbsoluteSize
-    if not absPos or not absSize then return false end
-    return pos.X >= absPos.X and pos.X <= absPos.X + absSize.X and
-           pos.Y >= absPos.Y and pos.Y <= absPos.Y + absSize.Y
-end
-
--- 更新按钮位置（拖动）
-local function updateButtonPosition(delta)
-    if not dragStartPos then return end
-    local newX = dragStartPos.X.Scale + (delta.X / screenGui.AbsoluteSize.X)
-    local newY = dragStartPos.Y.Scale + (delta.Y / screenGui.AbsoluteSize.Y)
-    newX = math.clamp(newX, 0.05, 0.85)
-    newY = math.clamp(newY, 0.05, 0.85)
-    button.Position = UDim2.new(newX, 0, newY, 0)
-end
-
--- 触摸开始
-uis.TouchBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.UserInputType ~= Enum.UserInputType.Touch then return end
-
-    print("[触摸] 触摸开始，位置:", input.Position)
-    if isPointInButton(input.Position) then
-        print("[触摸] 在按钮内")
-        isPointerDown = true
-        isDragging = false
-        dragStartMouse = input.Position
-        dragStartPos = button.Position
-    else
-        print("[触摸] 不在按钮内")
-    end
+button.TouchBegan:Connect(function(input)
+    isDragging = false
+    dragStart = input.Position
+    dragOrigin = button.Position
 end)
 
--- 触摸移动
-uis.TouchMoved:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.UserInputType ~= Enum.UserInputType.Touch then return end
-    if not isPointerDown then return end
-
-    local delta = input.Position - dragStartMouse
+button.TouchMoved:Connect(function(input)
+    if not dragStart then return end
+    local delta = input.Position - dragStart
     if delta.Magnitude > 10 then
         isDragging = true
-        updateButtonPosition(delta)
-        print("[触摸] 拖动中")
+        local newX = dragOrigin.X.Scale + delta.X / screenGui.AbsoluteSize.X
+        local newY = dragOrigin.Y.Scale + delta.Y / screenGui.AbsoluteSize.Y
+        button.Position = UDim2.new(math.clamp(newX, 0.05, 0.85), 0, math.clamp(newY, 0.05, 0.85), 0)
     end
 end)
 
--- 触摸结束
-uis.TouchEnded:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.UserInputType ~= Enum.UserInputType.Touch then return end
-    if not isPointerDown then return end
-
-    if not isDragging then
-        -- 点击（未拖动）触发飞行切换
-        print("[触摸] 点击触发飞行切换")
-        toggleFly()
-    else
-        print("[触摸] 拖动结束")
-    end
-    isPointerDown = false
-    isDragging = false
-    dragStartMouse = nil
-    dragStartPos = nil
+button.TouchEnded:Connect(function()
+    dragStart = nil
+    dragOrigin = nil
+    -- 注意：如果拖动，则不会触发 Activated（因为 Activated 是在点击时触发，拖动不会触发）
 end)
 
--- 同时支持鼠标（用于PC测试）
-uis.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        if isPointInButton(input.Position) then
-            isPointerDown = true
-            isDragging = false
-            dragStartMouse = input.Position
-            dragStartPos = button.Position
-            print("[鼠标] 在按钮内按下")
-        end
-    end
-end)
-uis.InputMoved:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.UserInputType == Enum.UserInputType.MouseMovement then
-        if isPointerDown and dragStartMouse then
-            local delta = input.Position - dragStartMouse
-            if delta.Magnitude > 10 then
-                isDragging = true
-                updateButtonPosition(delta)
-                print("[鼠标] 拖动中")
-            end
-        end
-    end
-end)
-uis.InputEnded:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        if isPointerDown then
-            if not isDragging then
-                print("[鼠标] 点击触发飞行切换")
-                toggleFly()
-            else
-                print("[鼠标] 拖动结束")
-            end
-            isPointerDown = false
-            isDragging = false
-            dragStartMouse = nil
-            dragStartPos = nil
-        end
-    end
-end)
-
--- ===== 飞行核心逻辑 =====
+-- 点击事件（使用 Activated，触摸和鼠标均有效，且不会因拖动而触发）
 local flying = false
 local bodyVelocity = nil
 local bodyGyro = nil
@@ -250,7 +155,9 @@ function toggleFly()
     end
 end
 
--- ===== 飞行控制 =====
+button.Activated:Connect(toggleFly)
+
+-- 飞行控制
 runService.RenderStepped:Connect(function()
     if not flying or not root or not hum then return end
 
@@ -289,5 +196,3 @@ player.CharacterAdded:Connect(function(newChar)
 end)
 
 getChar()
-print("[飞行测试] 终极版加载，使用全局触摸事件，点击按钮可切换飞行，拖动可移动按钮。")
-print("[提示] 请查看注入器控制台，触摸按钮时会打印日志。")
